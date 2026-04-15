@@ -1,12 +1,17 @@
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+import logging
 from datetime import timedelta
+
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .core.ems_engine import EMSEngine
+
+_LOGGER = logging.getLogger(__name__)
+
 
 class EMSCoordinator(DataUpdateCoordinator):
     def __init__(self, hass):
         super().__init__(
             hass,
-            logger=None,
+            logger=_LOGGER,
             name="ems_v1",
             update_interval=timedelta(seconds=300),
         )
