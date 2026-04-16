@@ -6,6 +6,8 @@ from .battery_model import BatteryModel, SimulationResult
 
 
 class SimulationEngine:
+    """Runs battery scenario comparisons and ranks ROI."""
+
     def __init__(self):
         self.model = BatteryModel()
 
@@ -20,10 +22,12 @@ class SimulationEngine:
         results: List[SimulationResult] = []
 
         for cap in capacities:
-            results.append(
-                self.model.simulate(cap, pv, load, price)
+            result = self.model.simulate(
+                cap, pv, load, price
             )
+            results.append(result)
 
+        # sort best ROI first
         results.sort(
             key=lambda r: r.total_savings - r.total_cost,
             reverse=True,
