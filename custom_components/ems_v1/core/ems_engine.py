@@ -4,6 +4,7 @@ from ..models.battery import BatteryModel
 from .decision import DecisionEngine
 from .roi import ROICalc
 
+
 class EMSEngine:
     def __init__(self, data):
         self.data = data
@@ -23,5 +24,5 @@ class EMSEngine:
             "action": action,
             "pv_corrected": pv,
             "load_forecast": load,
-            "roi": roi["yearly"]
+            "roi": roi["yearly"],
         }
