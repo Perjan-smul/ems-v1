@@ -14,6 +14,8 @@ class SimulationResult:
 
 
 class BatteryModel:
+    """Simplified battery simulation model (v1.2)."""
+
     def __init__(self, efficiency: float = 0.92):
         self.efficiency = efficiency
 
@@ -41,12 +43,14 @@ class BatteryModel:
 
             surplus = pv_i - load_i
 
+            # ---------------- CHARGE ----------------
             if surplus > 0:
                 charge = min(surplus, max_soc - soc)
                 soc += charge * self.efficiency
                 energy_throughput += charge
                 self_used += load_i
 
+            # ---------------- DISCHARGE ----------------
             else:
                 deficit = abs(surplus)
                 discharge = min(deficit, soc)
@@ -57,6 +61,7 @@ class BatteryModel:
 
                 total_savings += supplied * price_i
 
+            # ---------------- GRID COST ----------------
             net_load = max(load_i - pv_i, 0)
             total_cost += net_load * price_i
 
