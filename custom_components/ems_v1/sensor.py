@@ -1,79 +1,50 @@
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.sensor import SensorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = hass.data[DOMAIN]
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities = [
-        EMSActionSensor(coordinator),
-        EMSPVSensor(coordinator),
-        EMSLoadSensor(coordinator),
-        EMSROISensor(coordinator),
+        EMSSensor(coordinator, "ems_action", "action"),
+        EMSSensor(coordinator, "ems_pv_corrected", "pv"),
+        EMSSensor(coordinator, "ems_load_forecast", "load"),
+        EMSSensor(coordinator, "ems_roi", "simulation"),
     ]
 
     async_add_entities(entities)
 
 
-class BaseSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator):
+class EMSSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, name, key):
         super().__init__(coordinator)
-        self.coordinator = coordinator
-
-
-class EMSActionSensor(BaseSensor):
-    @property
-    def name(self):
-        return "EMS Action"
+        self._attr_name = name
+        self._key = key
 
     @property
-    def state(self):
-        return self.coordinator.data["action"]
+    def native_value(self):
 
-    @property
-    def icon(self):
-        return "mdi:battery"
+        data = self.coordinator.data
 
+        if not data:
+            return None
 
-class EMSPVSensor(BaseSensor):
-    @property
-    def name(self):
-        return "EMS PV Corrected"
+        if self._key == "pv":
+            return data.get("forecast", {}).get("pv_kw", [0])[0]
 
-    @property
-    def state(self):
-        return self.coordinator.data["pv_corrected"]
+        if self._key == "load":
+            return data.get("forecast", {}).get("load_kw", [0])[0]
 
-    @property
-    def icon(self):
-        return "mdi:solar-power"
+        if self._key == "simulation":
+            sim = data.get("simulation")
+            if sim:
+                return sim[0]["roi"]  # best scenario
+            return None
 
+        if self._key == "action":
+            return "IDLE"
 
-class EMSLoadSensor(BaseSensor):
-    @property
-    def name(self):
-        return "EMS Load Forecast"
-
-    @property
-    def state(self):
-        return self.coordinator.data["load_forecast"]
-
-    @property
-    def icon(self):
-        return "mdi:home-lightning-bolt"
-
-
-class EMSROISensor(BaseSensor):
-    @property
-    def name(self):
-        return "EMS ROI"
-
-    @property
-    def state(self):
-        return self.coordinator.data["roi"]
-
-    @property
-    def icon(self):
-        return "mdi:currency-eur"
+        return None
