@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
 
 
 @dataclass
@@ -40,10 +39,10 @@ class BatteryModel:
                 throughput += discharge
                 total_savings += supplied * price[i]
 
-            grid = max(load[i] - pv[i], 0)
-            total_cost += grid * price[i]
+            grid_cost = max(load[i] - pv[i], 0)
+            total_cost += grid_cost * price[i]
 
-        cycles = throughput / (capacity_kwh + 1e-6)
+        cycles = throughput / (capacity_kwh + 1e-9)
 
         return SimulationResult(
             capacity_kwh=capacity_kwh,
