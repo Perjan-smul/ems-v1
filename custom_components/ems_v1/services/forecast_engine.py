@@ -13,15 +13,17 @@ class ForecastSnapshot:
 
 
 class ForecastEngine:
+    """Normalizes all input data into 24h forecast vectors."""
+
     def __init__(self, hass, entry):
         self.hass = hass
         self.entry = entry
 
     async def build(self, pv_data, load_data, price_data):
 
-        pv = await self._normalize_pv(pv_data)
-        load = await self._normalize_load(load_data)
-        price = await self._normalize_price(price_data)
+        pv = self._normalize_pv(pv_data)
+        load = self._normalize_load(load_data)
+        price = self._normalize_price(price_data)
 
         return ForecastSnapshot(
             pv_kw=pv,
@@ -30,25 +32,27 @@ class ForecastEngine:
             hours=list(range(24)),
         )
 
-    async def _normalize_pv(self, pv_data):
-        if not pv_data:
-            return [0.0] * 24
+    # -------------------------
+    # NORMALIZATION
+    # -------------------------
+
+    def _normalize_pv(self, pv_data):
+        if isinstance(pv_data, dict):
+            return pv_data.get("forecast", [0.0] * 24)
         if isinstance(pv_data, list):
             return pv_data
-        return [float(pv_data.get("forecast", 0.0))] * 24
+        return [0.0] * 24
 
-    async def _normalize_load(self, load_data):
-        if not load_data:
-            return [0.5] * 24
+    def _normalize_load(self, load_data):
+        if isinstance(load_data, dict):
+            return load_data.get("forecast", [0.5] * 24)
         if isinstance(load_data, list):
             return load_data
-        base = float(load_data.get("avg", 0.5))
-        return [base] * 24
+        return [0.5] * 24
 
-    async def _normalize_price(self, price_data):
-        if not price_data:
-            return [0.25] * 24
+    def _normalize_price(self, price_data):
+        if isinstance(price_data, dict):
+            return price_data.get("forecast", [0.25] * 24)
         if isinstance(price_data, list):
             return price_data
-        base = float(price_data.get("avg", 0.25))
-        return [base] * 24
+        return [0.25] * 24
