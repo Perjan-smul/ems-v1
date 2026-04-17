@@ -1,111 +1,169 @@
 from __future__ import annotations
 
-from typing import Dict, Any
+import logging
+from datetime import timedelta
 
-from ..services.forecast_engine import ForecastEngine
-from ..services.simulation_engine import SimulationEngine
-from ..services.decision_engine import DecisionEngine
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 
-from ..learning.pv_learning import PVLearning
-from ..learning.load_learning import LoadLearning
-from ..storage.memory import EMSMemory
-from .state import EMSState
+from .core.pipeline import EMSPipeline
+from .services.forecast_engine import ForecastEngine
+
+_LOGGER = logging.getLogger(__name__)
 
 
-class EMSPipeline:
-    """EMS v2 pipeline with learning."""
+class EMSCoordinator(DataUpdateCoordinator):
+    """EMS V2 Coordinator with learning pipeline and V1 fallback."""
 
-    def __init__(self, hass, entry):
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry):
         self.hass = hass
         self.entry = entry
 
+        # V2 pipeline (primary)
+        self.pipeline = EMSPipeline(hass, entry)
+
+        # V1 fallback
         self.forecast_engine = ForecastEngine(hass, entry)
-        self.simulation_engine = SimulationEngine()
-        self.decision_engine = DecisionEngine()
 
-        # learning
-        self.memory = EMSMemory()
-        self.pv_learning = PVLearning(self.memory)
-        self.load_learning = LoadLearning(self.memory)
-
-        self.state = EMSState()
-
-    async def run(self, inputs: Dict[str, Any]):
-
-        # -------------------------
-        # 1. FORECAST
-        # -------------------------
-        forecast_obj = await self.forecast_engine.build(
-            inputs["pv"],
-            inputs["load"],
-            inputs["price"],
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"ems_v2_{entry.entry_id}",
+            update_interval=timedelta(minutes=5),
         )
 
-        forecast = {
-            "pv_kw": forecast_obj.pv_kw,
-            "load_kw": forecast_obj.load_kw,
-            "price_eur": forecast_obj.price_eur,
-            "hours": forecast_obj.hours,
-        }
+    async def _async_update_data(self):
+        """Main update loop."""
 
         # -------------------------
-        # 2. LEARNING UPDATE (current hour)
+        # 1. INPUT DATA
         # -------------------------
-        actual_pv = inputs.get("pv_now", 0.0)
-        actual_load = inputs.get("load_now", 0.0)
+        pv = await self._get_pv_data()
+        load = await self._get_load_data()
+        price = await self._get_price_data()
 
-        if forecast["pv_kw"]:
-            self.pv_learning.update(actual_pv, forecast["pv_kw"][0])
-
-        if forecast["load_kw"]:
-            self.load_learning.update(actual_load, forecast["load_kw"][0])
+        use_v2 = self.entry.options.get("use_v2_pipeline", True)
 
         # -------------------------
-        # 3. APPLY CORRECTION
+        # 2. V2 PIPELINE (PRIMARY)
         # -------------------------
-        forecast["pv_kw"] = self.pv_learning.correct(forecast["pv_kw"])
-        forecast["load_kw"] = self.load_learning.correct(forecast["load_kw"])
+        if use_v2:
+            try:
+                result = await self.pipeline.run(
+                    {
+                        "pv": pv,
+                        "load": load,
+                        "price": price,
+                        "pv_now": pv["current"],
+                        "load_now": load["current"],
+                    }
+                )
+
+                return {
+                    "pv": pv,
+                    "load": load,
+                    "price": price,
+                    "forecast": result.get("forecast"),
+                    "simulation": result.get("simulation"),
+                    "action": result.get("action"),
+                    "learning": result.get("learning"),
+                }
+
+            except Exception as e:
+                _LOGGER.exception("EMS V2 pipeline failed, falling back to V1: %s", e)
 
         # -------------------------
-        # 4. SIMULATION
+        # 3. V1 FALLBACK (SAFE MODE)
         # -------------------------
-        sim_raw = self.simulation_engine.run_scenarios(
-            capacities=[5, 10, 15, 20],
-            pv=forecast["pv_kw"],
-            load=forecast["load_kw"],
-            price=forecast["price_eur"],
-        )
-
-        simulation = [
-            {
-                "capacity_kwh": r.capacity_kwh,
-                "savings": r.total_savings,
-                "cost": r.total_cost,
-                "cycles": r.cycles,
-                "roi": r.total_savings - r.total_cost,
-            }
-            for r in sim_raw
-        ]
-
-        # -------------------------
-        # 5. DECISION
-        # -------------------------
-        decision = self.decision_engine.decide(
-            forecast=forecast,
-            simulation=simulation,
-        )
-
-        # -------------------------
-        # 6. STATE UPDATE
-        # -------------------------
-        self.state.update(decision, forecast)
+        forecast = await self.forecast_engine.build(pv, load, price)
 
         return {
-            "forecast": forecast,
-            "simulation": simulation,
-            "action": decision,
-            "learning": {
-                "pv_bias": self.memory.pv_bias(),
-                "load_bias": self.memory.load_bias(),
+            "pv": pv,
+            "load": load,
+            "price": price,
+            "forecast": {
+                "pv_kw": forecast.pv_kw,
+                "load_kw": forecast.load_kw,
+                "price_eur": forecast.price_eur,
+                "hours": forecast.hours,
             },
+            "simulation": None,
+            "action": "IDLE",
+            "learning": None,
         }
+
+    # ---------------------------------------------------
+    # DATA ADAPTERS (CRUCIAAL VOOR STABILITEIT)
+    # ---------------------------------------------------
+
+    async def _get_pv_data(self):
+        """
+        Expected output:
+        {
+            "current": float,
+            "forecast": [24 floats]
+        }
+        """
+
+        data = self.hass.data.get("ems_pv")
+
+        if isinstance(data, dict):
+            return {
+                "current": float(data.get("current", 0.0)),
+                "forecast": data.get("forecast", [0.0] * 24),
+            }
+
+        return {
+            "current": 0.0,
+            "forecast": [0.0] * 24,
+        }
+
+    async def _get_load_data(self):
+        """
+        Expected output:
+        {
+            "current": float,
+            "forecast": [24 floats]
+        }
+        """
+
+        data = self.hass.data.get("ems_load")
+
+        if isinstance(data, dict):
+            return {
+                "current": float(data.get("current", 0.5)),
+                "forecast": data.get("forecast", [0.5] * 24),
+            }
+
+        return {
+            "current": 0.5,
+            "forecast": [0.5] * 24,
+        }
+
+    async def _get_price_data(self):
+        """
+        Expected output:
+        {
+            "forecast": [24 floats]
+        }
+        """
+
+        data = self.hass.data.get("ems_price")
+
+        if isinstance(data, dict):
+            return {
+                "forecast": data.get("forecast", [0.25] * 24),
+            }
+
+        return {
+            "forecast": [0.25] * 24,
+        }
+
+    # ---------------------------------------------------
+    # CLEANUP
+    # ---------------------------------------------------
+
+    async def async_shutdown(self):
+        """Cleanup resources if needed."""
+        _LOGGER.debug("Shutting down EMS Coordinator")
