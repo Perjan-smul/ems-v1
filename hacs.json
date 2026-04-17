@@ -1,10 +1,6 @@
 {
   "name": "EMS V1 - Energy Management System",
-  "content_in_root": false,
-  "domains": ["sensor"],
-  "country": "NL",
-  "homeassistant": "2024.6.0",
   "render_readme": true,
-  "iot_class": "calculated",
-  "filename": "ems_v1.zip"
+  "homeassistant": "2024.6.0",
+  "country": "NL"
 }
